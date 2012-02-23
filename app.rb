@@ -3,12 +3,22 @@
 #
 # It will be required from either `config.ru` or `start.rb`
 require 'rubygems'
-require "bundler/setup"
-
+require 'bundler/setup'
 require 'ramaze'
 
 # Make sure that Ramaze knows where you are
 Ramaze.options.roots = [__DIR__]
+
+require 'rack/accept'
+#use Rack::Accept
+Ramaze.middleware! :dev do |m|
+  m.use(Rack::Accept)
+  m.run(Ramaze::AppMap)
+end
+Ramaze.middleware! :live do |m|
+  m.use(Rack::Accept)
+  m.run(Ramaze::AppMap)
+end
 
 require 'sequel'
 

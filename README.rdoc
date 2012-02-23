@@ -1,0 +1,19 @@
+== bar-tender
+
+We have a small vCenter lab.  It would be helpful to have a check out system for the virtual resources.  Just the
+basics so users can see what resources are available, check them out, and release them.  As a bonus it would be very
+useful if our automated tests could do the same.
+
+So what we need is:
+
+* user registration
+* user authentication
+* equipment CRUD
+* equipment reservation
+* web interface
+* scripting interface
+* simple reports
+* use RESTful techniques
+
+We like to code name our product development sprints after bars, so let's call this project "bar-tender".
+
