@@ -69,4 +69,5 @@ describe "HTTP RESTful Routes" do
     result['action'].should == 'delete'
     result['args'].should_not be_empty
   end
+
 end

@@ -165,4 +165,13 @@ describe "HTTP Accept Header" do
     result['error_backtrace'].should_not be_nil
     result['error_backtrace'].should_not be_empty
   end
+
+  it "should error on invalid action" do
+    result = http_accept_json(:GET, 'foobar')
+    result['error'].should_not be_nil
+    result['error'].should_not be_empty
+    result['error_backtrace'].should_not be_nil
+    result['error_backtrace'].should_not be_empty
+  end
+
 end

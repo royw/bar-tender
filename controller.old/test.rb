@@ -49,7 +49,7 @@ module Innate
 end
 
 # This test controller is
-class TestController < Controller
+class OldTestController < Controller
   map '/test'
   helper :flash
 

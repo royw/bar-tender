@@ -13,10 +13,12 @@ require 'rack/accept'
 #use Rack::Accept
 Ramaze.middleware! :dev do |m|
   m.use(Rack::Accept)
+  #m.use(Rack::Acceptable)
   m.run(Ramaze::AppMap)
 end
 Ramaze.middleware! :live do |m|
   m.use(Rack::Accept)
+  #m.use(Rack::Acceptable)
   m.run(Ramaze::AppMap)
 end
 

@@ -1,3 +1,55 @@
+require 'json'
+
+module Innate
+  module Node
+    # Resolve possible provides for the given +path+ from {provides}.
+    #
+    # @param [String] path
+    #
+    # @return [Array] with name, wish, engine
+    #
+    # @api internal
+    # @see Node::provide Node::provides
+    # @author manveru
+    def find_provide(path)
+      pr = provides
+      name, wish, engine = path, 'html', pr['html_handler']
+
+      accept = request.env['rack-accept.request']
+      #puts "accept=>#{accept.inspect}"
+      unless accept.nil?
+        http_accept = accept.env['HTTP_ACCEPT']
+        unless http_accept.nil?
+          #puts "http_accept=>#{http_accept}"
+          types = http_accept.strip.split(/[, ]+/)
+          unless types.empty?
+            content_types = ancestral_trait.reject{|key, value| key !~ /_content_type$/ }
+            matching_types = content_types.select{|key, value| types.include? value}
+            matching_types.each do |key, value|
+              prefix = $1 if key =~ /^(.*)_content_type$/
+              handler = pr["#{prefix}_handler"]
+              unless handler.nil?
+                name, wish, engine = path, prefix, handler
+                break
+              end
+            end
+          end
+        end
+      end
+
+      pr.find do |key, value|
+        key = key[/(.*)_handler$/, 1]
+        next unless path =~ /^(.+)\.#{key}$/i
+        name, wish, engine = $1, key, value
+      end
+
+      #puts "name=>#{name}, wish=>#{wish}, engine=>#{engine}"
+      return name, wish, engine
+    end
+
+  end
+end
+
 class RESTfulController < Controller
   helper :flash
 
@@ -8,22 +60,26 @@ class RESTfulController < Controller
     (value.merge(error_hash)).to_json
   end
 
+  RestMethods = {
+      'GET' => :list,
+      'PUT' => :replace,
+      'POST' => :create,
+      'DELETE' => :delete
+  }
+
   def index(*args)
-    result = case request.env['REQUEST_METHOD']
-    when 'GET'
-      fail "Unacceptable HTTP Method #{request.env['REQUEST_METHOD']} for list" unless request.get?
-      list(*args)
-    when 'PUT'
-      fail "Unacceptable HTTP Method #{request.env['REQUEST_METHOD']} for replace" unless request.put?
-      replace(*args)
-    when 'POST'
-      fail "Unacceptable HTTP Method #{request.env['REQUEST_METHOD']} for create" unless request.post?
-      create(*args)
-    when 'DELETE'
-      fail "Unacceptable HTTP Method #{request.env['REQUEST_METHOD']} for delete" unless request.delete?
-      delete(*args)
+    request_method = request.env['REQUEST_METHOD']
+    method = RestMethods[request_method]
+    if method.nil?
+      fail "Invalid request method '#{request_method}'"
+      return
     end
-    result
+    method = (method.to_s + (args.empty? ? '_set' : '_item')).to_sym
+    if self.respond_to? method
+      self.send(method, *args)
+    else
+      fail "Controller action method '#{method.to_s}' not implemented"
+    end
   end
 
   def fail(*args)
@@ -31,21 +87,9 @@ class RESTfulController < Controller
     flash[:error_backtrace] = caller(1)
   end
 
-  # the index action is called automatically when no other action is specified
-  def list(*args)
-    fail 'not implemented'
-  end
-
-  def replace(*args)
-    fail 'not implemented'
-  end
-
-  def create(*args)
-    fail 'not implemented'
-  end
-
-  def delete(*args)
-    fail 'not implemented'
+  def assert_request_method(*required_request_methods)
+    request_method = request.env['REQUEST_METHOD']
+    fail "Unacceptable HTTP Method #{request_method}" unless required_request_methods.include? request_method
   end
 
   def self.action_missing(path)

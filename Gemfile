@@ -6,6 +6,9 @@ gem 'sequel'
 gem 'sqlite3'
 gem 'json'
 gem 'rack-accept'
+gem 'omniauth'
+gem 'omniauth-ldap'
+
 
 # Add dependencies to develop your gem here.
 # Include everything needed to run rake, tests, features, etc.
@@ -17,4 +20,6 @@ group :development do
   gem 'rdoc' #, '~> 3.9.4'
   gem 'net-ssh'
   gem 'json'
+  gem 'rack-test', require: 'rack/test'
+  gem 'cucumber'
 end
