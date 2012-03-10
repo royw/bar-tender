@@ -1,0 +1,229 @@
+=== Defining the API
+
+We now have a working RESTfulController with a derived TestController that is tested with both rspec and cucumber.  Now
+we can get back to tackling our real project.  ;)  Uh, what were we wanting to develop?
+
+==== Lab Reservations (revisited)
+
+    We have a small vCenter lab.  It would be helpful to have a check out system for the virtual resources.  Just the
+    basics so users can see what resources are available, check them out, and release them.  As a bonus it would be very
+    useful if our automated tests could do the same.
+
+    So what we need is:
+
+    * user registration
+    * user authentication
+    * equipment CRUD
+    * equipment reservation
+    * web interface
+    * scripting interface
+    * simple reports
+    * develop RESTful techniques (and this article)
+
+    We like to code name our product development sprints after bars, so let's call this project "bar-tender".
+
+So the last item on our list is complete, let's start on the first two, user registration and user authentication.
+
+==== Users
+
+We will have two types of users: interactive via the web interface; and non-interactive (i.e., scripts).  Interactive
+users shall authenticate with our exchange server.  Non-interactive users shall authenticate preferable using a
+certificate, but if we are unable to figure out how to authenticate with a certificate, then with a password.
+
+So we can now state are user account requirements as:
+
+* Interactive users shall authenticate via LDAP with our exchange server.
+* Non-interactive users (scripts) shall authenticate via certificates.
+* Interactive users may CRUD non-interactive users.
+* Non-interactive users shall inherit the email address of the creating user.
+* Interactive users may CRUD equipment inventory.
+* All users may CRUD their own reservations.
+* If a user changes another user's reservation, a notification will be sent to the user with the original reservation.
+* No self registration (interactive user must exist on exchange server).
+
+Let's twist this around a little to get:
+
+* Non-logged in user must authenticate to be logged in.
+* Users authenticated by exchange have admin authorization.  Referred to as "admin users".
+* Users authenticated by certificate or password have script authorization.  Referred to as "script users".
+* Authentiticated users must have an email account, either given during authentication or already in the User table.
+* An User table will contain user name, email and optionally a script's public certificate or password salt.
+* Upon authentication, the User table will be updated and the user declared logged in and the appropriate authorization
+  assigned.
+* Logged in admin users may CRUD users with script authorization.
+* Logged in admin users may CRUD equipment inventory.
+* Logged in users may CRUD reservations.
+* Anyone may view reservations.
+* Anyone may view equipment inventory.
+
+Hmm, starting to look like a list of cucumber features... ;)
+
+A note, authentication, logging in, and authoriziation are actually seperate functions.
+
+A very flexible authentication rack plugin is omniauth.  There is an ldap plugin for omniauth.  I have not yet found
+a certificate plugin for it, but there is password based plugins.
+
+So lets get started with authentication.
+
+==== Authentication
+
+The way of OmniAuth is to do a GET /auth/:provider where :provider is a configured service.  OmniAuth then returns
+an HTML form with the fields needed by that provider.  The submit button on the form is hooked to a
+POST /auth/:provider/callback.  This POST enters the rack stack, OmniAuth gets it and performs the authentication, adds
+the authentication results to the request, then passes the request along where eventually the we handle it in a
+controller.  Our action handler in our controller can then access the authentication results.
+
+For our REST API, we do not want the HTML form, so we can skip the GET and go straight to the POST.
+
+So let's prove the feasibility by using the include :developer provider that takes a 'name' and 'email' parameter on
+the POST, then just assumes they are authentic and passes the request along.
+
+We will start with a cucumber feature and make it table based so we can later add more providers:
+
+    ∴ cat features/authentication.feature
+    @authentication
+    Feature: User Authentication
+      A user should be able to authenticate with an authentication service.
+
+      Scenario Outline: Service Authentication
+        Given an authentication service: <authentication service>
+        And the service's required parameters: <parameters>
+        And the service's accept type is application/json
+        When the post callback is issued
+        Then the response should not be blank
+        And the response body should not be blank
+        And the response body should be parseable by JSON
+        And the returned JSON should not be blank
+        And the returned JSON should have these values: <returned JSON>
+
+      Scenarios: Services
+        | authentication service | parameters                                       | returned JSON |
+        | developer              | {'name'=>'Roy','email'=>'rwright@coretrace.com'} | ["{\"provider\":\"developer\",\"uid\":\"rwright@coretrace.com\",\"info\":{\"name\":\"Roy\",\"email\":\"rwright@coretrace.com\"},\"credentials\":{},\"extra\":{},\"error\":null,\"error_backtrace\":null}"] |
+
+Then we can end up with these authentication steps:
+
+    ∴ cat features/support/authentication_steps.rb
+    Given /^an authentication service: (.*)$/ do |arg1|
+      @service = arg1.to_sym
+    end
+
+    Given /^the service's required parameters: (.*)$/ do |arg1|
+      @params = eval(arg1)
+    end
+
+    Given /^the service's accept type is application\/json$/ do
+      header 'Accept', 'application/json'
+    end
+
+    When /^the post callback is issued$/ do
+      post "/auth/#{@service.to_s}/callback", @params
+    end
+
+    Then /^the response should not be blank$/ do
+      last_response.should_not be_blank
+    end
+
+    Then /^the response body should not be blank$/ do
+      last_response.body.should_not be_blank
+    end
+
+    Then /^the response body should be parseable by JSON$/ do
+      @json_data = JSON.parse last_response.body
+    end
+
+    Then /^the returned JSON should not be blank$/ do
+      @json_data.should_not be_blank
+    end
+
+    Then /^the returned JSON should have these values: (.*)$/ do |arg1|
+      expected = JSON.parse(arg1)
+      expected.each do |k,v|
+        @json_data[k].should == v
+      end
+    end
+
+When this feature is ran, it complains about a missing method, "blank?".  I really like to use "blank?" which means
+"nil? or empty?".  So we need to extend Object with a "blank?" method.  For now let's just do it in our env.rb:
+
+    ∴ cat features/support/env.rb
+    require "rubygems"
+    require "bundler/setup"
+
+    require "rack"
+    require "rack/test"
+    require "rspec"
+    require 'json'
+
+    require_relative('../../app')
+
+    # == Synopsis
+    # Various extensions to the Object class
+    # Note, uses the Module.my_extension method to only add the method if
+    # it doesn't already exist.
+    class Object
+      unless Object.respond_to?('blank?')
+        # Is the object nil or empty?
+        # return [TrueClass|FalseClass] asserted if object is nil or empty
+        def blank?
+          result = nil?
+          unless result
+            if respond_to? 'empty?'
+              if respond_to? 'strip'
+                result = strip.empty?
+              else
+                if respond_to? 'compact'
+                  result = compact.empty?
+                else
+                  result = empty?
+                end
+              end
+            end
+          end
+          result
+        end
+      end
+    end
+
+    Ramaze.setup_dependencies
+    Ramaze::Log.level = Logger::ERROR
+
+    def app
+      Rack::Lint.new(Ramaze.middleware)
+    end
+
+    World(Rack::Test::Methods)
+
+Now we can get our feature to work by adding the Controller:
+
+    ∴ cat controller/service.rb
+
+    class ServiceController < Controller
+      map '/auth/developer'
+
+      provide(:json, :type => 'application/json') do |action, value|
+        # "value" is the response body from our controller's method
+        error_hash = {:error => Ramaze::Current.session.flash[:error],
+                      :error_backtrace => Ramaze::Current.session.flash[:error_backtrace]}
+        (value.merge(error_hash)).to_json
+      end
+
+      def callback
+        Ramaze::Log.info "request.env['omniauth.auth'] => #{auth_hash.inspect}"
+        session[:user_name] = auth_hash.info.nickname
+        Ramaze::Log.info "Authorization developer callback, username => #{session[:user_name]}"
+        auth_hash
+      end
+
+      def auth_hash
+        request.env['omniauth.auth']
+      end
+
+      def failure
+        Ramaze::Log.warn("Authorization failure")
+        redirect '/'
+      end
+    end
+
+Cool, we can authenticate!  But to log in, we are going to need a User model, so it's time to add database support
+to our app.
+

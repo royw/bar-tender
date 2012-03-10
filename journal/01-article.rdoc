@@ -1,0 +1,31 @@
+== RESTful Ramaze
+
+This article will document my journey in developing the parts necessary for a RESTful web application.
+
+=== Background
+
+I'm tasked with replacing a java/hibernate/postgres server with a silverlight UI application with a web 2.0 application.
+This is for a small company that is not a Rails shop.  We decided on a ruby/ramaze/sequel/postgres server with
+HTML5/CSS3/javascript UI.
+
+The one unknown is if Ramaze can handle RESTful compliance.  So I decided to do a small project to find out.
+
+=== Lab Reservations
+
+We have a small vCenter lab.  It would be helpful to have a check out system for the virtual resources.  Just the
+basics so users can see what resources are available, check them out, and release them.  As a bonus it would be very
+useful if our automated tests could do the same.
+
+So what we need is:
+
+* user registration
+* user authentication
+* equipment CRUD
+* equipment reservation
+* web interface
+* scripting interface
+* simple reports
+* develop RESTful techniques (and this article)
+
+We like to code name our product development sprints after bars, so let's call this project "bar-tender".
+

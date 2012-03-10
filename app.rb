@@ -5,29 +5,48 @@
 require 'rubygems'
 require 'bundler/setup'
 require 'ramaze'
+require 'rack/accept'
+require 'omniauth'
 
 # Make sure that Ramaze knows where you are
 Ramaze.options.roots = [__DIR__]
 
-require 'rack/accept'
-#use Rack::Accept
+Ramaze::Log.loggers = [Logger.new($stdout)]
+
 Ramaze.middleware! :dev do |m|
+  m.use(Rack::Session::Cookie)
   m.use(Rack::Accept)
-  #m.use(Rack::Acceptable)
+  m.use OmniAuth::Builder do
+    provider :developer
+    #provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  end
   m.run(Ramaze::AppMap)
 end
 Ramaze.middleware! :live do |m|
+  m.use(Rack::Session::Cookie)
   m.use(Rack::Accept)
-  #m.use(Rack::Acceptable)
+  m.use OmniAuth::Builder do
+    #provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  end
+  m.run(Ramaze::AppMap)
+end
+Ramaze.middleware! :test do |m|
+  m.use(Rack::Session::Cookie)
+  m.use(Rack::Accept)
+  m.use OmniAuth::Builder do
+    provider :developer
+    #provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  end
   m.run(Ramaze::AppMap)
 end
 
-require 'sequel'
+# The mode defaults to :dev
+mode = ENV['Ramaze.options.mode'] || 'dev'
+Ramaze.options.mode = mode.to_sym
+puts "Ramaze.options.mode => #{Ramaze.options.mode.inspect}"
 
-DATA_DIR = __DIR__('data')
-FileUtils.mkdir_p DATA_DIR
-DATABASE_FILE = "#{DATA_DIR}/bar-tender.db"
-DB = Sequel.connect("sqlite://#{DATABASE_FILE}")
+require_relative 'db/config'
+DB = Sequel.connect(Database.url(Ramaze.options.mode))
 
 # Initialize controllers and models
 require __DIR__('model/init')

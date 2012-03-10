@@ -1,8 +1,12 @@
 require 'spec_helper'
 
-Ramaze::Current.session = Rack::Test::Session.new(Rack::MockSession.new(app))
+#ENV['RACK_ENV'] = 'test'
 
 describe("Test RESTfulController") do
+  before :all do
+    Ramaze::Current.session = Rack::Test::Session.new(Rack::MockSession.new(app))
+    @session = Ramaze::Current.session
+  end
 
   it "should handle set list" do
     header 'Accept', 'application/json'
@@ -17,8 +21,8 @@ describe("Test RESTfulController") do
   end
 
   it "should handle set replace" do
-    header 'Accept', 'application/json'
-    resp = put '/test'
+    @session.header 'Accept', 'application/json'
+    resp = @session.put '/test'
     resp.status.should == 200
     resp.header['Content-Type'].should == 'application/json'
     resp_data = JSON.parse(resp.body)
@@ -29,8 +33,8 @@ describe("Test RESTfulController") do
   end
 
   it "should handle set create" do
-    header 'Accept', 'application/json'
-    resp = post '/test'
+    @session.header 'Accept', 'application/json'
+    resp = @session.post '/test'
     resp.status.should == 200
     resp.header['Content-Type'].should == 'application/json'
     resp_data = JSON.parse(resp.body)
@@ -41,8 +45,8 @@ describe("Test RESTfulController") do
   end
 
   it "should handle set delete" do
-    header 'Accept', 'application/json'
-    resp = delete '/test'
+    @session.header 'Accept', 'application/json'
+    resp = @session.delete '/test'
     resp.status.should == 200
     resp.header['Content-Type'].should == 'application/json'
     resp_data = JSON.parse(resp.body)
@@ -53,8 +57,8 @@ describe("Test RESTfulController") do
   end
 
   it "should handle item list" do
-    header 'Accept', 'application/json'
-    resp = get '/test/1'
+    @session.header 'Accept', 'application/json'
+    resp = @session.get '/test/1'
     resp.status.should == 200
     resp.header['Content-Type'].should == 'application/json'
     resp_data = JSON.parse(resp.body)
@@ -66,8 +70,8 @@ describe("Test RESTfulController") do
   end
 
   it "should handle item replace" do
-    header 'Accept', 'application/json'
-    resp = put '/test/2'
+    @session.header 'Accept', 'application/json'
+    resp = @session.put '/test/2'
     resp.status.should == 200
     resp.header['Content-Type'].should == 'application/json'
     resp_data = JSON.parse(resp.body)
@@ -79,8 +83,8 @@ describe("Test RESTfulController") do
   end
 
   it "should handle item create" do
-    header 'Accept', 'application/json'
-    resp = post '/test/3'
+    @session.header 'Accept', 'application/json'
+    resp = @session.post '/test/3'
     resp.status.should == 200
     resp.header['Content-Type'].should == 'application/json'
     resp_data = JSON.parse(resp.body)
@@ -92,8 +96,8 @@ describe("Test RESTfulController") do
   end
 
   it "should handle item delete" do
-    header 'Accept', 'application/json'
-    resp = delete '/test/4'
+    @session.header 'Accept', 'application/json'
+    resp = @session.delete '/test/4'
     resp.status.should == 200
     resp.header['Content-Type'].should == 'application/json'
     resp_data = JSON.parse(resp.body)

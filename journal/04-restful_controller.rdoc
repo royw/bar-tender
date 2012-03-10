@@ -1,0 +1,598 @@
+=== RESTful Controller
+
+Time to write our RESTful controller!  GONG!
+
+We should start with some good RSpecs then write the controller!  But alas, I did it backwards again and refactored
+our TestController into a RESTfulController:
+
+    ∴ cat controller/restful.rb
+    require 'json'
+
+    module Innate
+      module Node
+        # Resolve possible provides for the given +path+ from {provides}.
+        #
+        # @param [String] path
+        #
+        # @return [Array] with name, wish, engine
+        #
+        # @api internal
+        # @see Node::provide Node::provides
+        # @author manveru
+        def find_provide(path)
+          pr = provides
+          name, wish, engine = path, 'html', pr['html_handler']
+
+          accept = request.env['rack-accept.request']
+          #puts "accept=>#{accept.inspect}"
+          unless accept.nil?
+            http_accept = accept.env['HTTP_ACCEPT']
+            unless http_accept.nil?
+              #puts "http_accept=>#{http_accept}"
+              types = http_accept.strip.split(/[, ]+/)
+              unless types.empty?
+                content_types = ancestral_trait.reject{|key, value| key !~ /_content_type$/ }
+                matching_types = content_types.select{|key, value| types.include? value}
+                matching_types.each do |key, value|
+                  prefix = $1 if key =~ /^(.*)_content_type$/
+                  handler = pr["#{prefix}_handler"]
+                  unless handler.nil?
+                    name, wish, engine = path, prefix, handler
+                    break
+                  end
+                end
+              end
+            end
+          end
+
+          pr.find do |key, value|
+            key = key[/(.*)_handler$/, 1]
+            next unless path =~ /^(.+)\.#{key}$/i
+            name, wish, engine = $1, key, value
+          end
+
+          #puts "name=>#{name}, wish=>#{wish}, engine=>#{engine}"
+          return name, wish, engine
+        end
+
+      end
+    end
+
+    class RESTfulController < Controller
+      helper :flash
+
+      provide(:json, :type => 'application/json') do |action, value|
+        # "value" is the response body from our controller's method
+        error_hash = {:error => Ramaze::Current.session.flash[:error],
+                      :error_backtrace => Ramaze::Current.session.flash[:error_backtrace]}
+        (value.merge(error_hash)).to_json
+      end
+
+      RestMethods = {
+          'GET' => :list,
+          'PUT' => :replace,
+          'POST' => :create,
+          'DELETE' => :delete
+      }
+
+      def index(*args)
+        request_method = request.env['REQUEST_METHOD']
+        method = RestMethods[request_method]
+        if method.nil?
+          fail "Invalid request method '#{request_method}'"
+          return
+        end
+        method = (method.to_s + (args.empty? ? '_set' : '_item')).to_sym
+        if self.respond_to? method
+          self.send(method, *args)
+        else
+          fail "Controller action method '#{method.to_s}' not implemented"
+        end
+      end
+
+      def fail(*args)
+        flash[:error] = args.join("\n")
+        flash[:error_backtrace] = caller(1)
+      end
+
+      def assert_request_method(*required_request_methods)
+        request_method = request.env['REQUEST_METHOD']
+        fail "Unacceptable HTTP Method #{request_method}" unless required_request_methods.include? request_method
+      end
+
+      def self.action_missing(path)
+        fail "action for '#{path}' is missing"
+        dirname = File.dirname(path)
+        basename = File.basename(path, '.*')
+        extname = File.extname(path)
+        return if path == '/not_found'
+        return if dirname + basename == '/not_found'
+        # No normal action, runs on bare metal
+        try_resolve('/not_found' + extname)
+      end
+
+      def not_found(*args)
+      end
+
+    end
+
+and a new TestController:
+
+∴ cat controller/test2.rb
+require 'json'
+
+# This test controller is
+class TestController < RESTfulController
+  map '/test'
+
+  def assert_integer_param(*args)
+    fail "Expected integer parameter" if(!args.empty? && (args[0] !~ /^\d+$/))
+  end
+
+  def list_set
+    assert_request_method('GET')
+    {:action => 'list-set',
+     :args => []}
+  end
+
+  def replace_set
+    assert_request_method('PUT')
+    {:action => 'replace-set',
+     :args => []}
+  end
+
+  def create_set
+    assert_request_method('POST')
+    {:action => 'create-set',
+     :args => []}
+  end
+
+  def delete_set
+    assert_request_method('DELETE')
+    {:action => 'delete-set',
+     :args => []}
+  end
+
+  def list_item(*args)
+    assert_request_method('GET')
+    assert_integer_param(*args)
+    {:action => 'list-item',
+     :args => args}
+  end
+
+  def replace_item(*args)
+    assert_request_method('PUT')
+    assert_integer_param(*args)
+    {:action => 'replace-item',
+     :args => args}
+  end
+
+  def create_item(*args)
+    assert_request_method('POST')
+    assert_integer_param(*args)
+    {:action => 'create-item',
+     :args => args}
+  end
+
+  def delete_item(*args)
+    assert_request_method('DELETE')
+    assert_integer_param(*args)
+    {:action => 'delete-item',
+     :args => args}
+  end
+
+end
+
+And then tackled the rspec.  I know, my bad.
+
+==== RSpec
+
+I'll be honest, the following rspecs took me a few hours to figure out a pattern to accomplish what I want, which is
+to not need a running instance of the application when testing a REST API.  The first diversion was trying to use
+Innate's MockRequest/MockResponse.  Turns out that's just not low enough on the stack because the new RESTfulController
+uses the rack/accept middleware.  So we need to hook into the Rack::Test API.
+
+So without further ado:
+
+    ∴ cat spec/spec_helper.rb
+    require "rubygems"
+    require "bundler/setup"
+
+    require "rack"
+    require "rack/test"
+    require "rspec"
+    require 'json'
+
+    require_relative('../app')
+
+    Ramaze.setup_dependencies
+    Ramaze::Log.level = Logger::ERROR
+
+    RSpec.configure do |config|
+      config.mock_with :rspec
+      config.include Rack::Test::Methods
+
+      def app
+        Rack::Lint.new(Ramaze.middleware)
+      end
+    end
+
+The one piece of magic in the above that I still don't have a good explanation for is the
+
+    Ramaze.setup_dependencies
+
+line.  It's undocumented in the source, innate.rb, and appears to used for setting cacheing, but without it will cause
+the session to be undefined.
+
+You will need to add the following to the development section of your Gemfile and run "bundle install" again:
+
+    gem 'rack-test', require: 'rack/test'
+
+The Rack::Test::Methods give use get, put, post, delete methods that inject at the start of the Rack stack.  This lets
+us do a brute force rspec like:
+
+    ∴ cat spec/test2_routing_spec.rb
+    require 'spec_helper'
+
+    Ramaze::Current.session = Rack::Test::Session.new(Rack::MockSession.new(app))
+
+    describe("Test RESTfulController") do
+
+      it "should handle set list" do
+        header 'Accept', 'application/json'
+        resp = get '/test'
+        resp.status.should == 200
+        resp.header['Content-Type'].should == 'application/json'
+        resp_data = JSON.parse(resp.body)
+        resp_data['action'].should == 'list-set'
+        resp_data['args'].should be_empty
+        resp_data['error'].should be_nil
+        resp_data['error_backtrace'].should be_nil
+      end
+
+      it "should handle set replace" do
+        header 'Accept', 'application/json'
+        resp = put '/test'
+        resp.status.should == 200
+        resp.header['Content-Type'].should == 'application/json'
+        resp_data = JSON.parse(resp.body)
+        resp_data['action'].should == 'replace-set'
+        resp_data['args'].should be_empty
+        resp_data['error'].should be_nil
+        resp_data['error_backtrace'].should be_nil
+      end
+
+      it "should handle set create" do
+        header 'Accept', 'application/json'
+        resp = post '/test'
+        resp.status.should == 200
+        resp.header['Content-Type'].should == 'application/json'
+        resp_data = JSON.parse(resp.body)
+        resp_data['action'].should == 'create-set'
+        resp_data['args'].should be_empty
+        resp_data['error'].should be_nil
+        resp_data['error_backtrace'].should be_nil
+      end
+
+      it "should handle set delete" do
+        header 'Accept', 'application/json'
+        resp = delete '/test'
+        resp.status.should == 200
+        resp.header['Content-Type'].should == 'application/json'
+        resp_data = JSON.parse(resp.body)
+        resp_data['action'].should == 'delete-set'
+        resp_data['args'].should be_empty
+        resp_data['error'].should be_nil
+        resp_data['error_backtrace'].should be_nil
+      end
+
+      it "should handle item list" do
+        header 'Accept', 'application/json'
+        resp = get '/test/1'
+        resp.status.should == 200
+        resp.header['Content-Type'].should == 'application/json'
+        resp_data = JSON.parse(resp.body)
+        resp_data['action'].should == 'list-item'
+        resp_data['args'].size.should == 1
+        resp_data['args'][0].should == '1'
+        resp_data['error'].should be_nil
+        resp_data['error_backtrace'].should be_nil
+      end
+
+      it "should handle item replace" do
+        header 'Accept', 'application/json'
+        resp = put '/test/2'
+        resp.status.should == 200
+        resp.header['Content-Type'].should == 'application/json'
+        resp_data = JSON.parse(resp.body)
+        resp_data['action'].should == 'replace-item'
+        resp_data['args'].size.should == 1
+        resp_data['args'][0].should == '2'
+        resp_data['error'].should be_nil
+        resp_data['error_backtrace'].should be_nil
+      end
+
+      it "should handle item create" do
+        header 'Accept', 'application/json'
+        resp = post '/test/3'
+        resp.status.should == 200
+        resp.header['Content-Type'].should == 'application/json'
+        resp_data = JSON.parse(resp.body)
+        resp_data['action'].should == 'create-item'
+        resp_data['args'].size.should == 1
+        resp_data['args'][0].should == '3'
+        resp_data['error'].should be_nil
+        resp_data['error_backtrace'].should be_nil
+      end
+
+      it "should handle item delete" do
+        header 'Accept', 'application/json'
+        resp = delete '/test/4'
+        resp.status.should == 200
+        resp.header['Content-Type'].should == 'application/json'
+        resp_data = JSON.parse(resp.body)
+        resp_data['action'].should == 'delete-item'
+        resp_data['args'].size.should == 1
+        resp_data['args'][0].should == '4'
+        resp_data['error'].should be_nil
+        resp_data['error_backtrace'].should be_nil
+      end
+
+    end
+
+==== Cucumber
+
+OK, I'm finally trying to learn Cucumber so here's my first Cucumber feature.  Start by adding cucumber to your Gemfile
+and running "bundle install":
+
+    gem 'cucumber'
+
+Then create the feature directory and it's support directory:
+
+    mkdir -p features/support
+    touch features/support/env.rb
+
+The env.rb tells cucumber we are using ruby.
+
+Add the following to the Rakefile:
+
+    require 'cucumber/rake/task'
+    Cucumber::Rake::Task.new(:features)
+
+Using the spec_helper.rb as our example, we can setup cucumber similarly by adding the following to
+features/support/env.rb:
+
+    ∴ cat features/support/env.rb
+    require "rubygems"
+    require "bundler/setup"
+
+    require "rack"
+    require "rack/test"
+    require "rspec"
+    require 'json'
+
+    require_relative('../../app')
+
+    Ramaze.setup_dependencies
+    Ramaze::Log.level = Logger::ERROR
+
+    def app
+      Rack::Lint.new(Ramaze.middleware)
+    end
+
+    World(Rack::Test::Methods)
+
+Now it's time to start telling tall tails (writing stories).  I started by creating features/restful.feature with the
+following contents:
+
+    Feature: RESTful Routing
+      The RESTfulController shall support the eight actions as
+      described in http://en.wikipedia.org/wiki/Restful#RESTful_web_services
+
+The eight test cases looked like a good opportunity for a scenarios outline so with some play came up with:
+
+      Scenario Outline: RESTful web services
+        Given the http method: "<http_method>"
+        And the url: "<url>"
+        And an Accept type of: "<accept>"
+        When the method is invoked
+        Then the http response status is: "<status>"
+        And the http response Content-Type is: "<content_type>"
+        And the response body is: <response_body>
+
+        Scenarios: all
+          | http_method | url     | accept           | status | content_type     | response_body                                                                 |
+          | get         | /test   | application/json | 200    | application/json | {'action'=>'list-set',     'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | put         | /test   | application/json | 200    | application/json | {'action'=>'replace-set',  'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | post        | /test   | application/json | 200    | application/json | {'action'=>'create-set',   'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | delete      | /test   | application/json | 200    | application/json | {'action'=>'delete-set',   'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | get         | /test/1 | application/json | 200    | application/json | {'action'=>'list-item',    'args'=>[1], 'error'=>nil, 'error_backtrace'=>nil} |
+          | put         | /test/2 | application/json | 200    | application/json | {'action'=>'replace-item', 'args'=>[2], 'error'=>nil, 'error_backtrace'=>nil} |
+          | post        | /test/3 | application/json | 200    | application/json | {'action'=>'create-item',  'args'=>[3], 'error'=>nil, 'error_backtrace'=>nil} |
+          | delete      | /test/4 | application/json | 200    | application/json | {'action'=>'delete-item',  'args'=>[4], 'error'=>nil, 'error_backtrace'=>nil} |
+
+The response_body values will be eval'ed to a hash, then compared with the JSON parsed response.body.
+
+Running cucumber then gives:
+
+    ∴ brake features
+    /Users/royw/.rvm/rubies/ruby-1.9.2-p290/bin/ruby -S bundle exec cucumber
+    Feature: RESTful Routing
+      The RESTfulController shall support the eight actions as
+      described in http://en.wikipedia.org/wiki/Restful#RESTful_web_services
+
+      Scenario Outline: RESTful web services                    # features/restful.feature:6
+        Given the http method: "<http_method>"                  # features/restful.feature:7
+        And the url: "<url>"                                    # features/restful.feature:8
+        And an Accept type of: "<accept>"                       # features/restful.feature:9
+        When the method is invoked                              # features/restful.feature:10
+        Then the http response status is: "<status>"            # features/restful.feature:11
+        And the http response Content-Type is: "<content_type>" # features/restful.feature:12
+        And the response body is: <response_body>               # features/restful.feature:13
+
+        Scenarios: all
+          | http_method | url     | accept           | status | content_type     | response_body                                                                 |
+          | get         | /test   | application/json | 200    | application/json | {'action'=>'list-set',     'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | put         | /test   | application/json | 200    | application/json | {'action'=>'replace-set',  'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | post        | /test   | application/json | 200    | application/json | {'action'=>'create-set',   'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | delete      | /test   | application/json | 200    | application/json | {'action'=>'delete-set',   'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | get         | /test/1 | application/json | 200    | application/json | {'action'=>'list-item',    'args'=>[1], 'error'=>nil, 'error_backtrace'=>nil} |
+          | put         | /test/2 | application/json | 200    | application/json | {'action'=>'replace-item', 'args'=>[2], 'error'=>nil, 'error_backtrace'=>nil} |
+          | post        | /test/3 | application/json | 200    | application/json | {'action'=>'create-item',  'args'=>[3], 'error'=>nil, 'error_backtrace'=>nil} |
+          | delete      | /test/4 | application/json | 200    | application/json | {'action'=>'delete-item',  'args'=>[4], 'error'=>nil, 'error_backtrace'=>nil} |
+
+    8 scenarios (8 undefined)
+    56 steps (56 undefined)
+    0m0.062s
+
+    You can implement step definitions for undefined steps with these snippets:
+
+    Given /^the http method: "([^"]*)"$/ do |arg1|
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Given /^the url: "([^"]*)"$/ do |arg1|
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Given /^an Accept type of: "([^"]*)"$/ do |arg1|
+      pending # express the regexp above with the code you wish you had
+    end
+
+    When /^the method is invoked$/ do
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Then /^the http response status is: "([^"]*)"$/ do |arg1|
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Then /^the http response Content\-Type is: "([^"]*)"$/ do |arg1|
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Then /^the response body is: \{'action'=>'list\-set',     'args'=>\[\],  'error'=>nil, 'error_backtrace'=>nil\}$/ do
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Then /^the response body is: \{'action'=>'replace\-set',  'args'=>\[\],  'error'=>nil, 'error_backtrace'=>nil\}$/ do
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Then /^the response body is: \{'action'=>'create\-set',   'args'=>\[\],  'error'=>nil, 'error_backtrace'=>nil\}$/ do
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Then /^the response body is: \{'action'=>'delete\-set',   'args'=>\[\],  'error'=>nil, 'error_backtrace'=>nil\}$/ do
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Then /^the response body is: \{'action'=>'list\-item',    'args'=>\[(\d+)\], 'error'=>nil, 'error_backtrace'=>nil\}$/ do |arg1|
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Then /^the response body is: \{'action'=>'replace\-item', 'args'=>\[(\d+)\], 'error'=>nil, 'error_backtrace'=>nil\}$/ do |arg1|
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Then /^the response body is: \{'action'=>'create\-item',  'args'=>\[(\d+)\], 'error'=>nil, 'error_backtrace'=>nil\}$/ do |arg1|
+      pending # express the regexp above with the code you wish you had
+    end
+
+    Then /^the response body is: \{'action'=>'delete\-item',  'args'=>\[(\d+)\], 'error'=>nil, 'error_backtrace'=>nil\}$/ do |arg1|
+      pending # express the regexp above with the code you wish you had
+    end
+
+So let's take the stubs, put them into features/support/restful_steps.rb, condensing the "the response body is" steps to
+a single step, then replace the pending with the real code:
+
+    ∴ cat features/support/restful_steps.rb
+    Given /^the http method: "([^"]*)"$/ do |arg1|
+      @http_method = arg1
+    end
+
+    Given /^the url: "([^"]*)"$/ do |arg1|
+      @url = arg1
+    end
+
+    Given /^an Accept type of: "([^"]*)"$/ do |arg1|
+      header 'Accept', arg1
+    end
+
+    When /^the method is invoked$/ do
+      @response = send(@http_method, @url)
+    end
+
+    Then /^the http response status is: "([^"]*)"$/ do |arg1|
+      @response.status == arg1
+    end
+
+    Then /^the http response Content\-Type is: "([^"]*)"$/ do |arg1|
+      @response.header['Content-Type'] == arg1
+    end
+
+    Then /^the response body is: (.*)$/ do |arg1|
+      body = case @response.header['Content-Type']
+      when 'application/json'
+        JSON.parse(@response.body)
+      else
+        nil
+      end
+      body == eval(arg1)
+    end
+
+Also add a step link to the beginning of features/restful.feature:
+
+    @restful
+
+And running it yields:
+
+    ∴ brake features
+    /Users/royw/.rvm/rubies/ruby-1.9.2-p290/bin/ruby -S bundle exec cucumber
+    @restful
+    Feature: RESTful Routing
+      The RESTfulController shall support the eight actions as
+      described in http://en.wikipedia.org/wiki/Restful#RESTful_web_services
+
+      Scenario Outline: RESTful web services                    # features/restful.feature:6
+        Given the http method: "<http_method>"                  # features/support/restful_steps.rb:1
+        And the url: "<url>"                                    # features/support/restful_steps.rb:5
+        And an Accept type of: "<accept>"                       # features/support/restful_steps.rb:9
+        When the method is invoked                              # features/support/restful_steps.rb:13
+        Then the http response status is: "<status>"            # features/support/restful_steps.rb:17
+        And the http response Content-Type is: "<content_type>" # features/support/restful_steps.rb:21
+        And the response body is: <response_body>               # features/support/restful_steps.rb:25
+
+        Scenarios: all
+          | http_method | url     | accept           | status | content_type     | response_body                                                                 |
+          | get         | /test   | application/json | 200    | application/json | {'action'=>'list-set',     'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | put         | /test   | application/json | 200    | application/json | {'action'=>'replace-set',  'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | post        | /test   | application/json | 200    | application/json | {'action'=>'create-set',   'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | delete      | /test   | application/json | 200    | application/json | {'action'=>'delete-set',   'args'=>[],  'error'=>nil, 'error_backtrace'=>nil} |
+          | get         | /test/1 | application/json | 200    | application/json | {'action'=>'list-item',    'args'=>[1], 'error'=>nil, 'error_backtrace'=>nil} |
+          | put         | /test/2 | application/json | 200    | application/json | {'action'=>'replace-item', 'args'=>[2], 'error'=>nil, 'error_backtrace'=>nil} |
+          | post        | /test/3 | application/json | 200    | application/json | {'action'=>'create-item',  'args'=>[3], 'error'=>nil, 'error_backtrace'=>nil} |
+          | delete      | /test/4 | application/json | 200    | application/json | {'action'=>'delete-item',  'args'=>[4], 'error'=>nil, 'error_backtrace'=>nil} |
+
+    8 scenarios (8 passed)
+    56 steps (56 passed)
+    0m0.104s
+
+==== Cleanup
+
+As we have progressed we have left behind some work that is no longer needed, so let's take a moment and move our old
+controller and old rspecs to an archive location:
+
+    mkdir spec.old
+    mv spec/main.rb spec.old/
+    mv spec/test_accept_routing_spec.rb spec.old/
+    mv spec/test_errors_routing_spec.rb spec.old/
+    mv spec/test_rest_routing_spec.rb spec.old/
+    mv spec/test_routing_spec.rb spec.old/
+
+    mkdir controller.old
+    mv controller/test.rb controller.old/test.rb
+
+I prefer to move old stuff to an old directory then at the end of the project clean the old directories.  Just personal
+preference.  If you want you can just delete them.
+

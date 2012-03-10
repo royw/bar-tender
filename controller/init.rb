@@ -15,4 +15,5 @@ end
 #    require(controller)
 #  end
 #
-Dir["#{__DIR__}/**/*.rb"].reject{|fn| ['init.rb', 'test.rb'].include? File.basename(fn)}.each {|fn| require fn}
+require_relative 'restful'
+Dir["#{__DIR__}/**/*.rb"].reject{|fn| ['init.rb', 'restful.rb'].include? File.basename(fn)}.each {|fn| require fn}

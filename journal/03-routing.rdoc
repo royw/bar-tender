@@ -1,0 +1,670 @@
+=== Controller With JSON
+
+I'm going to do this project a little differently than normal.  First we will get the controllers working with JSON
+content type, then worry about the HTML UI.
+
+First a little digression in how Ramaze controllers work.  The expected URLs look like
+"http://address/controller/action.type/parameters".
+
+The "address" is where the web application is residing and may include a port.
+
+The "controller" part may be matched two ways: To the value given the "map" method in the controller, or from the name
+of the controller (using the controller naming convention).
+
+The "action" is optional (defaults to "index") and invokes the method with the same name inside the controller.
+
+The ".type" is optional (defaults to "html"), but if given then the "action" must be explicitly given too, and requests
+that the action return this type of data.  The "provide" method is used to handle non-HTML requests and is responsible
+for converting any data to the requested content type.
+
+The "parameters" are passed as variable arguments to the action method.
+
+Whew!  What a mouthful!  I say a couple of examples are needed:
+
+    http://localhost:7000
+    # calls MainController.index()
+    # expects HTML content
+    # Explanation: convention maps the main controller to '/', the default action is "index", default content-type is HTML
+
+    http://localhost:7000/index
+    # same as above but explicitly calling the "index" action
+
+    http://localhost:7000/index.html
+    # same as previous but explicitly specifying the content-type
+
+    http://localhost:7000/index.json
+    # same as previous but specifying JSON content-type.
+
+    http://localhost:7000/equipment/show
+    # calls EquipmentController.show()
+    # Explanation: Using convention, tries to find EquipmentController (by convention should be in controllers/equipment.rb)
+    # or a controller with a "map 'equipment'" statement.  The action "show" is explicitly requested.
+
+    http://localhost:7000/equipment/show.json/42
+    # calls EquipmentController.show('42') and expects a "provide" block for content-type of 'json'.
+
+    http://localhost:7000/equipment/show.json/42/towel/1
+    # calls EquipmentController.show('42', 'towel', '1') and expects a "provide" block for content-type of 'json'.
+
+Notice that the HTTP request method (GET, PUT, POST, DELETE) has no effect on routing.  FYI, the request method is
+passed in the request's env hash: request.env["REQUEST_METHOD"].
+
+==== RESTful v. Ramaze
+
+Now's a good time to go review the wikipedia article on Representational state transfer (REST)  http://en.wikipedia.org/wiki/Restful
+
+Under "RESTful web services" there are eight defined HTTP methods, broken into two sets of four for sets and items.  Let's
+compare these with a Ramaze way
+
+                        RESTful                                  Ramaze (action names arbitrary)
+                    -------------------------------------   ------------------------------------------
+    list set        GET    http://address/controller        GET  http://address/controller/list
+    replace set     PUT    http://address/controller        PUT  http://address/controller/replace
+    create set      POST   http://address/controller        POST http://address/controller/create
+    delete set      DELETE http://address/controller        PUT  http://address/controller/delete
+    list item       GET    http://address/controller/item   GET  http://address/controller/list/item
+    replace item    PUT    http://address/controller/item   PUT  http://address/controller/replace/item
+    create item     POST   http://address/controller/item   POST http://address/controller/create/item
+    delete item     DELETE http://address/controller/item   PUT  http://address/controller/delete/item
+
+So we have functional equivalence and could stop here.  But that's not the mission.  ;)
+
+==== RSpec for Ramaze URLs
+
+A small digression here.  I'm going to abuse rspecs initially by having them run against the running application.
+Whem I'm playing around, not sure exactly where I'm going, I find this easier than having to set up mocks and
+other offline tools.  We will revisit this a little later in the project.
+
+Let's start with a rspec for a test controller that uses Ramaze style routes, then morph it into RESTful routes.
+
+    ∴ cat spec/test_routing_spec.rb
+    require 'ramaze'
+    require "rspec"
+
+    require 'net/http'
+    require 'json'
+
+    # helper routine that will send an HTTP request to the test system requesting json content type and return the result
+    # object returned via json
+    def http_json(http_method, params, data=nil)
+      url = URI.parse("http://localhost:7000/test/#{params}")
+
+      Net::HTTP.start(url.host, url.port) do |http|
+        initheader = {'Accept' => 'application/json'}
+        response = case http_method
+        when :GET
+          http.get(url.path, initheader)
+        when :PUT
+          http.put(url.path, data, initheader)
+        when :POST
+          http.post(url.path, data, initheader)
+        when :DELETE
+          http.delete(url.path, initheader)
+        end
+        JSON.parse(response.body)
+      end
+    end
+
+    describe "Ramaze routes" do
+
+      it "should list set" do
+        result = http_json(:GET, 'list.json')
+        result['action'].should == 'list'
+        result['args'].should be_empty
+      end
+
+      it "should replace set" do
+        result = http_json(:PUT, 'replace.json', 'replace set data')
+        result['action'].should == 'replace'
+        result['args'].should be_empty
+      end
+      it "should create set"  do
+        result = http_json(:POST, 'create.json', 'create set data')
+        result['action'].should == 'create'
+        result['args'].should be_empty
+      end
+      it "should delete set"  do
+        result = http_json(:DELETE, 'delete.json')
+        result['action'].should == 'delete'
+        result['args'].should be_empty
+      end
+
+      it "should list item"  do
+        result = http_json(:GET, 'list/1.json')
+        result['action'].should == 'list'
+        result['args'].should_not be_empty
+      end
+      it "should replace item"  do
+        result = http_json(:PUT, 'replace/2.json', 'replace item data')
+        result['action'].should == 'replace'
+        result['args'].should_not be_empty
+      end
+      it "should create item"  do
+        result = http_json(:POST, 'create/3.json', 'create item data')
+        result['action'].should == 'create'
+        result['args'].should_not be_empty
+      end
+      it "should delete item"  do
+        result = http_json(:DELETE, 'delete/4.json')
+        result['action'].should == 'delete'
+        result['args'].should_not be_empty
+      end
+    end
+
+We are expecting the test controller's actions to return a Hash with 'action' and 'args' keys, so let's write the
+controller:
+
+    ∴ cat controller/test.rb
+
+    require 'json'
+
+    # This test controller is
+    class TestController < Controller
+      map '/test'
+
+      provide(:json, :type => 'application/json') do |action, value|
+        # "value" is the response body from our controller's method
+        Ramaze::Log.info "provide action=, value=>#{value.inspect}"
+        value.to_json
+      end
+
+      # the index action is called automatically when no other action is specified
+      def list(*args)
+        raise "Unacceptable HTTP Method #{request.env['REQUEST_METHOD']}" unless request.get?
+        {:action => 'list',
+         :args => args}
+      end
+
+      def replace(*args)
+        raise "Unacceptable HTTP Method #{request.env['REQUEST_METHOD']}" unless request.put?
+        {:action => 'replace',
+         :args => args}
+      end
+
+      def create(*args)
+        raise "Unacceptable HTTP Method #{request.env['REQUEST_METHOD']}" unless request.post?
+        {:action => 'create',
+         :args => args}
+      end
+
+      def delete(*args)
+        raise "Unacceptable HTTP Method #{request.env['REQUEST_METHOD']}" unless request.delete?
+        {:action => 'delete',
+         :args => args}
+      end
+
+      def self.action_missing(path)
+        Ramaze::Log.warn "action_missing(#{path})"
+        dirname = File.dirname(path)
+        basename = File.basename(path, '.*')
+        extname = File.extname(path)
+        return if path == '/not_found'
+        return if dirname + basename == '/not_found'
+        # No normal action, runs on bare metal
+        try_resolve('/not_found' + extname)
+        #try_resolve('/not_found')
+      end
+
+      def not_found(*args)
+        Ramaze::Log.warn "not_found(#{args.inspect})"
+        # Normal action
+        {:action => 'not_found',
+         :args => args}
+      end
+
+    end
+
+And run the rspec:
+
+    ∴ brake spec
+    /Users/royw/.rvm/rubies/ruby-1.9.2-p290/bin/ruby -S bundle exec rspec spec/test_routing_spec.rb
+    ........
+
+    Finished in 0.08842 seconds
+    8 examples, 0 failures
+
+You probably noticed that this is not a good rspec as it only tickles positive tests, but my purpose was to verify
+routes, not the full controller.  Feel free to add negative tests.  ;)
+
+==== Morph to using HTTP Accept Header
+
+What we want to do is allow the controller to use the Accept field in the HTTP header instead of depending on the
+type being the last extension in the path.  These two curl commands should illustrate the difference:
+
+    curl -X "GET" http://localhost:7000/test/list.json
+    curl -H "Accept: application/json" -X "GET" http://localhost:7000/test/list
+
+So let's make our test controller work with both schemes.
+
+The first problem is that the Request instance given to our action methods do not have a "HTTP_ACCEPT" environment key.
+Luckily Ramaze/Innate is built on top of Rack so we can add the Rack/Accept middleware.
+
+Add rack-accept to Gemfile and install the bundle:
+
+    ∴ cat Gemfile
+    source 'http://rubygems.org'
+
+    gem 'bundler' #, '~> 1.0.18'
+    gem 'ramaze'
+    gem 'sequel'
+    gem 'sqlite3'
+    gem 'json'
+    gem 'rack-accept'
+
+    # Add dependencies to develop your gem here.
+    # Include everything needed to run rake, tests, features, etc.
+    group :development do
+      gem 'rake'
+      gem 'rspec' #, '~> 2.6.0'
+      gem 'bundler' #, '~> 1.0.18'
+      gem 'simplecov' #, '>= 0'
+      gem 'rdoc' #, '~> 3.9.4'
+      gem 'net-ssh'
+      gem 'json'
+    end
+    ∴ bundle install
+    ...
+
+Next is to edit the app.rb to hook into the middleware.  Add:
+
+    require 'rack/accept'
+    Ramaze.middleware! :dev do |m|
+      m.use(Rack::Accept)
+      m.run(Ramaze::AppMap)
+    end
+    Ramaze.middleware! :live do |m|
+      m.use(Rack::Accept)
+      m.run(Ramaze::AppMap)
+    end
+
+This hooks Rack::Accept into both of the default runtime environments (:dev, :live).
+
+Now each Request instance should be able to access an Accept instance from request.env['rack-accept.request'].  To
+get the HTTP_ACCEPT value you would access it something like:
+
+    accept = request.env['rack-accept.request']
+    accept.env['HTTP_ACCEPT']  => ['application/json']
+
+OK, it's time to dive through Ramaze and into Innate::Node.  I highly suggest reading all of Innate::Node for background
+(it is very readable).  We are interested in two entry points, Node.provide() and Node.call().  The provide method
+is where the "provide(:json, :type => 'application/json', &block)" command we used in our test
+controller is processed.  Basically two traits are defined, one takes the name (:json) and the :type value to form
+a "json_content_type => 'application/json'" trait and the other takes the name and the block to create a
+"json_handler => &block" trait.
+
+The call method is where a rack request enters Innate.  Let's trace down it's stack:
+
+    call --> try_resolve --> resolve --> find_provide
+
+The find_provide() takes the path, examines the last extension, scans the *_handler traits for one where the * matches
+the path's extension.  If none found, then default to the HTML handler.
+
+Cool, we should now have a good idea how the provide command works and how the extension is used to select our provide
+block.  Unfortunately I didn't see a clean hook into this processing chain.  What I'd like is if the Accept header
+is given, then find a matching content_type trait and use it's corresponding handler, then if none are found to use
+the current proccessing.  So here's the ugly monkey patch to the TestController I came up with:
+
+    module Innate
+      module Node
+        # Resolve possible provides for the given +path+ from {provides}.
+        #
+        # @param [String] path
+        #
+        # @return [Array] with name, wish, engine
+        #
+        # @api internal
+        # @see Node::provide Node::provides
+        # @author manveru
+        def find_provide(path)
+          pr = provides
+          name, wish, engine = path, 'html', pr['html_handler']
+
+          accept = request.env['rack-accept.request']
+          unless accept.nil?
+            http_accept = accept.env['HTTP_ACCEPT']
+            unless http_accept.nil?
+              types = http_accept.strip.split(/[, ]+/)
+              unless types.empty?
+                content_types = ancestral_trait.reject{|key, value| key !~ /_content_type$/ }
+                matching_types = content_types.select{|key, value| types.include? value}
+                matching_types.each do |key, value|
+                  prefix = $1 if key =~ /^(.*)_content_type$/
+                  handler = pr["#{prefix}_handler"]
+                  unless handler.nil?
+                    name, wish, engine = path, prefix, handler
+                    break
+                  end
+                end
+              end
+            end
+          end
+
+          pr.find do |key, value|
+            key = key[/(.*)_handler$/, 1]
+            next unless path =~ /^(.+)\.#{key}$/i
+            name, wish, engine = $1, key, value
+          end
+
+          return name, wish, engine
+        end
+      end
+    end
+
+    # This test controller is
+    class TestController < Controller
+    ...
+
+and the new rspec (derived from the previous rspec):
+
+    ∴ cat spec/test_accept_routing_spec.rb
+    require 'ramaze'
+    require "rspec"
+
+    require 'net/http'
+    require 'json'
+
+    # helper routine that will send an HTTP request to the test system requesting json content type and return the result
+    # object returned via json
+    def http_accept_json(http_method, params, data=nil)
+      url = URI.parse("http://localhost:7000/test/#{params}")
+
+      Net::HTTP.start(url.host, url.port) do |http|
+        initheader = {'Accept:' => 'application/json'}
+        response = case http_method
+        when :GET
+          http.get(url.path, initheader)
+        when :PUT
+          http.put(url.path, data, initheader)
+        when :POST
+          http.post(url.path, data, initheader)
+        when :DELETE
+          http.delete(url.path, initheader)
+        end
+        JSON.parse(response.body)
+      end
+    end
+
+    describe "HTTP Accept Header" do
+
+      it "should list set" do
+        result = http_accept_json(:GET, 'list')
+        result['action'].should == 'list'
+        result['args'].should be_empty
+      end
+
+      it "should replace set" do
+        result = http_accept_json(:PUT, 'replace', 'replace set data')
+        result['action'].should == 'replace'
+        result['args'].should be_empty
+      end
+      it "should create set"  do
+        result = http_accept_json(:POST, 'create', 'create set data')
+        result['action'].should == 'create'
+        result['args'].should be_empty
+      end
+      it "should delete set"  do
+        result = http_accept_json(:DELETE, 'delete')
+        result['action'].should == 'delete'
+        result['args'].should be_empty
+      end
+
+      it "should list item"  do
+        result = http_accept_json(:GET, 'list/1')
+        result['action'].should == 'list'
+        result['args'].should_not be_empty
+      end
+      it "should replace item"  do
+        result = http_accept_json(:PUT, 'replace/2', 'replace item data')
+        result['action'].should == 'replace'
+        result['args'].should_not be_empty
+      end
+      it "should create item"  do
+        result = http_accept_json(:POST, 'create/3', 'create item data')
+        result['action'].should == 'create'
+        result['args'].should_not be_empty
+      end
+      it "should delete item"  do
+        result = http_accept_json(:DELETE, 'delete/4')
+        result['action'].should == 'delete'
+        result['args'].should_not be_empty
+      end
+    end
+
+And run both:
+
+    ∴ brake spec
+    /Users/royw/.rvm/rubies/ruby-1.9.2-p290/bin/ruby -S bundle exec rspec spec/test_accept_routing_spec.rb spec/test_routing_spec.rb
+    ................
+
+    Finished in 0.27518 seconds
+    16 examples, 0 failures
+
+Whoop!
+
+==== Minus the Action Names
+
+Now that the hard part is done, let's get rid of the action names from the path URL.  This is simply a default action
+(index) that parses based on HTTP request method.
+
+The next rspec:
+
+    ∴ cat spec/test_rest_routing_spec.rb
+    require 'ramaze'
+    require "rspec"
+
+    require 'net/http'
+    require 'json'
+
+    # helper routine that will send an HTTP request to the test system requesting json content type and return the result
+    # object returned via json
+    def http_rest_json(http_method, options={})
+      url = (options[:params].nil? ? URI.parse("http://localhost:7000/test") : URI.parse("http://localhost:7000/test/#{options[:params]}"))
+
+      Net::HTTP.start(url.host, url.port) do |http|
+        initheader = {'Accept:' => 'application/json'}
+        response = case http_method
+        when :GET
+          http.get(url.path, initheader)
+        when :PUT
+          http.put(url.path, options[:data], initheader)
+        when :POST
+          http.post(url.path, options[:data], initheader)
+        when :DELETE
+          http.delete(url.path, initheader)
+        end
+        JSON.parse(response.body)
+      end
+    end
+
+    describe "HTTP RESTful Routes" do
+
+      it "should list set" do
+        result = http_rest_json(:GET)
+        result['action'].should == 'list'
+        result['args'].should be_empty
+      end
+
+      it "should replace set" do
+        result = http_rest_json(:PUT, :data=>'replace set data')
+        result['action'].should == 'replace'
+        result['args'].should be_empty
+      end
+      it "should create set"  do
+        result = http_rest_json(:POST, :data=>'create set data')
+        result['action'].should == 'create'
+        result['args'].should be_empty
+      end
+      it "should delete set"  do
+        result = http_rest_json(:DELETE)
+        result['action'].should == 'delete'
+        result['args'].should be_empty
+      end
+
+      it "should list item"  do
+        result = http_rest_json(:GET, :params=>'1')
+        result['action'].should == 'list'
+        result['args'].should_not be_empty
+      end
+      it "should replace item"  do
+        result = http_rest_json(:PUT, :params=>'2', :data=>'replace item data')
+        result['action'].should == 'replace'
+        result['args'].should_not be_empty
+      end
+      it "should create item"  do
+        result = http_rest_json(:POST, :params=>'3', :data=>'create item data')
+        result['action'].should == 'create'
+        result['args'].should_not be_empty
+      end
+      it "should delete item"  do
+        result = http_rest_json(:DELETE, :params=>'4')
+        result['action'].should == 'delete'
+        result['args'].should_not be_empty
+      end
+    end
+
+and the new TestController method:
+
+    def index(*args)
+      case request.env['REQUEST_METHOD']
+      when 'GET'
+        list(*args)
+      when 'PUT'
+        replace(*args)
+      when 'POST'
+        create(*args)
+      when 'DELETE'
+        delete(*args)
+      end
+    end
+
+==== Error Error Error
+
+What about error handling?  Currently any errors are being rendered as HTML.  Let's see if we can fix that too.
+
+First we will add a standard fail(*args) method to our TestController that uses the flash helper (this is the normal
+technique for HTML UIs):
+
+    helper :flash
+
+    def fail(*args)
+      flash[:error] = args.join("\n")
+      flash[:error_backtrace] = caller(1)
+    end
+
+Next we will modify our provide() method like:
+
+    provide(:json, :type => 'application/json') do |action, value|
+      # "value" is the response body from our controller's method
+      error_hash = {:error => Ramaze::Current.session.flash[:error],
+                    :error_backtrace => Ramaze::Current.session.flash[:error_backtrace]}
+      (value.merge(error_hash)).to_json
+    end
+
+Note that we had to use fully qualified references to the flash as the provide block is not ran in our controllers
+context.
+
+And than add some error checking specs to test_accept_routing_spec.rb:
+
+    it "should return json error on bad method PUT for list" do
+      result = http_accept_json(:PUT, 'list', 'list set data')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+    it "should return json error on bad method POST for list" do
+      result = http_accept_json(:POST, 'list', 'list set data')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+    it "should return json error on bad method DELETE for list" do
+      result = http_accept_json(:DELETE, 'list')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+    it "should return json error on bad method GET for replace" do
+      result = http_accept_json(:GET, 'replace')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+    it "should return json error on bad method POST for replace" do
+      result = http_accept_json(:POST, 'replace', 'replace set data')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+    it "should return json error on bad method DELETE for replace" do
+      result = http_accept_json(:DELETE, 'replace', 'replace set data')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+    it "should return json error on bad method GET for create" do
+      result = http_accept_json(:GET, 'create')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+    it "should return json error on bad method PUT for create" do
+      result = http_accept_json(:PUT, 'create', 'create set data')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+    it "should return json error on bad method DELETE for create" do
+      result = http_accept_json(:DELETE, 'create')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+    it "should return json error on bad method GET for delete" do
+      result = http_accept_json(:GET, 'delete')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+    it "should return json error on bad method PUT for delete" do
+      result = http_accept_json(:PUT, 'delete', 'delete set data')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+    it "should return json error on bad method POST for delete" do
+      result = http_accept_json(:POST, 'delete', 'delete set data')
+      result['error'].should_not be_nil
+      result['error'].should_not be_empty
+      result['error_backtrace'].should_not be_nil
+      result['error_backtrace'].should_not be_empty
+    end
+
+
+==== RESTful Routing Test Summation
+
+We have proved with our TestController that we can do RESTful routing.  Whoop!  The next step is to move the discovered
+patterns into a generic RestfulController that our project's controllers can inherit from.
+
+

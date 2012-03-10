@@ -4,3 +4,5 @@
 
 # Here go your requires for models:
 # require __DIR__('user')
+Dir["#{__DIR__}/**/*.rb"].reject{|fn| ['init.rb'].include? File.basename(fn)}.each {|fn| require fn}
+
