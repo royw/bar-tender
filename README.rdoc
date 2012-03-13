@@ -17,3 +17,34 @@ So what we need is:
 
 We like to code name our product development sprints after bars, so let's call this project "bar-tender".
 
+=== Journal
+
+The chronicles of developing bar-tender are in the journal directory.  I tried to include every step, but did skip
+some of my head scratching, research, trail and errors (emphasis on the later) that went into the development.
+
+=== Thank You!
+
+A big thank you to:
+
+* Yorrick Peterse for Ramaze
+* Everyone who has contributed to Ramaze
+* The Ramaze Google Group for all their help
+
+=== References
+
+* http://www.ramaze.net
+* http://gembundler.com/
+* https://github.com/rack/rack
+* http://mjijackson.com/rack-accept/
+* https://github.com/brynary/rack-test
+* https://github.com/intridea/omniauth
+* http://rspec.info/
+* http://cukes.info/
+* https://github.com/colszowka/simplecov
+* http://sequel.rubyforge.org
+* http://www.sqlite.org/
+* http://www.postgresql.org/
+* http://json.rubyforge.org/
+* http://pragprog.com/book/achbd/the-rspec-book
+
+

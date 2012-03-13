@@ -106,15 +106,6 @@ Hook in bundle to the application by adding the following to app.rb:
     require 'rubygems'
     require "bundler/setup"
 
-Hook the database setup into app.rb:
-
-    require 'sequel'
-
-    DATA_DIR = __DIR__('data')
-    FileUtils.mkdir_p DATA_DIR
-    DATABASE_FILE = "#{DATA_DIR}/bar-tender.db"
-    DB = Sequel.connect("sqlite://#{DATABASE_FILE}")
-
 Now's a good time to make sure the app can run:
 
     ∴ ramaze start

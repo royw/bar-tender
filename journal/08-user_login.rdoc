@@ -1,0 +1,117 @@
+=== User Authorization
+
+We can now authenticate users and create an entry for them in the users table.  What we need next is to handle
+authorization.
+
+==== User Rolls
+
+Recall that we want to handle three authorization levels: admin, script, and everyone.  The usual model is to use
+the user helper, which also handles authentication via the User model.  I don't see an easy way to adapting the
+user helper to our needs, so we will roll our own using the user helper as our model.
+
+What we want to be able to do is something like:
+
+    class SomeController
+      def required_authorization(level=:everyone)
+        return true if level == :everyone
+        fail "Must be logged in" unless logged_in?
+        user = Session[:current_user]
+        authorized = case level
+        when :admin
+          user.admin?
+        when :script
+          user.script? || user.admin?
+        else
+          fail "Unsupported authorization level: #{level.to_s}"
+        end
+        fail "Must have #{level.to_s} authorization" unless authorized
+      end
+
+      def adminOnlyAction
+        required_authorization(:admin)
+        ...
+      end
+
+      def scriptOrAdminAction
+        required_authorization(:script)
+        ...
+      end
+
+      def everyoneAction
+        required_authorization(:everyone)
+        ...
+      end
+    end
+
+So let's start with adding the admin? and script? methods to the User model.
+
+    ∴ cat db/migrations/002_user_roll.rb
+    Sequel.migration do
+      up do
+        add_column :users, :roll, String
+        self[:users].update(:roll=>'unknown')
+      end
+
+      down do
+        drop_column :users, :roll
+      end
+
+    ∴ cat model/user.rb
+
+    class User < Sequel::Model(:users)
+
+      def script?
+        roll == 'script'
+      end
+
+      def admin?
+        roll == 'admin'
+      end
+    end
+
+    ∴ brake db:migrate[test]
+    sequel -m db/migrations sqlite:///Volumes/MacHD/Users/royw/projects/bar-tender/db/data/bar-tender-test.db
+
+    ∴ brake db:migrate[dev]
+    sequel -m db/migrations sqlite:///Volumes/MacHD/Users/royw/projects/bar-tender/db/data/bar-tender-dev.db
+
+    ∴ cat features/user_rolls.feature
+    @user_rolls
+    Feature: User rolls and states
+      Each user shall have a roll assigned when they are first logged in based on the authentication method
+      used (ldap will set roll to admin, certificate or password will set roll to script, default roll is unknown).
+
+
+      Scenario Outline: User rolls
+        Given a user with a roll set to: <user roll>
+        When the user is queried
+        Then the script? method should return: <script?>
+        And the admin? method should return: <admin?>
+
+      Scenarios: Possible rolls and the query results
+        | user roll | script? | admin? |
+        | unknown   | false   | false  |
+        | script    | true    | false  |
+        | admin     | false   | true   |
+
+    ∴ cat features/support/user_rolls_steps.rb
+    Given /^a user with a roll set to: (.*)$/ do |arg1|
+      @user_roll = arg1
+    end
+
+    When /^the user is queried$/ do
+      @user = User.find_or_create(:name => 'test', :email => 'test@example.com', :roll => @user_roll)
+    end
+
+    Then /^the script\? method should return: (.*)$/ do |arg1|
+      @user.script?.should == !!(arg1 =~ /^true/i)
+    end
+
+    Then /^the admin\? method should return: (.*)$/ do |arg1|
+      @user.admin?.should == !!(arg1 =~ /^true/i)
+    end
+
+==== Controller logged_in?
+
+==== Controller authorized?
+

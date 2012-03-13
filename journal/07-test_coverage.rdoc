@@ -1,0 +1,32 @@
+=== Test coverage
+
+As we are using ruby 1.9, we will use SimpleCov for test coverage.  The instructions at
+https://github.com/colszowka/simplecov are perfect so we just follow them:
+
+We already had gem "simplecov" in our Gemfile, so no need to change it.
+
+Then to the top of spec/spec_helper.rb and features/support/env.rb we add:
+
+    require 'simplecov'
+    SimpleCov.start
+
+And edit .gitignore to ignore the coverage directory:
+
+    ∴ cat .gitignore
+    .DS_Store
+    .idea
+    *~
+    rdoc/*
+    *.log
+    coverage
+
+Then run the specs and point your browser at coverage/index.html.
+
+    ∴ brake spec
+    ∴ open -a /Applications/Safari.app coverage/index.html
+
+And repeat for the features:
+
+    ∴ brake features
+    ∴ open -a /Applications/Safari.app coverage/index.html
+

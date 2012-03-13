@@ -5,9 +5,9 @@ we can get back to tackling our real project.  ;)  Uh, what were we wanting to d
 
 ==== Lab Reservations (revisited)
 
-    We have a small vCenter lab.  It would be helpful to have a check out system for the virtual resources.  Just the
-    basics so users can see what resources are available, check them out, and release them.  As a bonus it would be very
-    useful if our automated tests could do the same.
+    We have a small vCenter lab.  It would be helpful to have a check out system for the virtual resources.
+    Just the basics so users can see what resources are available, check them out, and release them.  As a
+    bonus it would be very useful if our automated tests could do the same.
 
     So what we need is:
 
@@ -60,8 +60,8 @@ Hmm, starting to look like a list of cucumber features... ;)
 
 A note, authentication, logging in, and authoriziation are actually seperate functions.
 
-A very flexible authentication rack plugin is omniauth.  There is an ldap plugin for omniauth.  I have not yet found
-a certificate plugin for it, but there is password based plugins.
+A very flexible authentication rack plugin is omniauth (https://github.com/intridea/omniauth).  There is an ldap
+plugin for omniauth.  I have not yet found a certificate plugin for it, but there are password based plugins.
 
 So lets get started with authentication.
 

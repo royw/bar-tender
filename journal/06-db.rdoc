@@ -1,6 +1,7 @@
 === Database Support
 
-We are going to use Sequel to initially connect to sqlite3 file database, then eventually move to a postgres database.
+We are going to use Sequel (http://sequel.rubyforge.org/) to initially connect to sqlite3 (http://www.sqlite.org/)
+file database, then eventually move to a postgres (http://www.postgresql.org/) database.
 
 One of the major advantages of Ramaze is that it does not include database support.  Yes, you read that right!  We
 do not have to figure out how to disable or replace a magical database that works by convention.  Whoooop!  Instead
@@ -198,6 +199,24 @@ Hook into the model/init.rb:
     # require __DIR__('user')
     Dir["#{__DIR__}/**/*.rb"].reject{|fn| ['init.rb'].include? File.basename(fn)}.each {|fn| require fn}
 
-And finally into our service controller.
+And finally in our service controller change the callback method to:
+
+      def callback
+        Ramaze::Log.info "request.env['omniauth.auth'] => #{auth_hash.inspect}"
+        session[:user_name] = auth_hash.info.name
+        user = User.find_or_create(:name => auth_hash.info.name, :email => auth_hash.info.email)
+        Ramaze::Log.info "Authorization developer callback, user => #{user.inspect}"
+        auth_hash
+      end
+
+So now we can run our features then check the contents of the users table:
+
+    ∴ brake features
+    ...
+    ∴ sqlite3 db/data/bar-tender-test.db "select * from users;"
+    1|Roy|rwright@example.com
+
+Whoooop!  Models work!
+
 
 

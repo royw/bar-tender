@@ -4,9 +4,8 @@ This article will document my journey in developing the parts necessary for a RE
 
 === Background
 
-I'm tasked with replacing a java/hibernate/postgres server with a silverlight UI application with a web 2.0 application.
-This is for a small company that is not a Rails shop.  We decided on a ruby/ramaze/sequel/postgres server with
-HTML5/CSS3/javascript UI.
+I'm investigating a new project which will include a ruby/ramaze/sequel/postgres server with HTML5/CSS3/javascript UI
+and a RESTful API.
 
 The one unknown is if Ramaze can handle RESTful compliance.  So I decided to do a small project to find out.
 

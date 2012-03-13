@@ -4,3 +4,4 @@
 rdoc/*
 *.log
 coverage
+db/data
