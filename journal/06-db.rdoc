@@ -9,7 +9,7 @@ we get to tell it exactly what we want.  So let's do it!
 
 Sequel uses the external migration file paradigm for defining the schema, then the models retrieve their schema from
 the database.  So we will need rake tasks for creating, migrating, rolling back the database.  These rake tasks will
-need a URL string for the squel command line command.
+need a URL string for the sequel command line command.
 
 Our models will need a connection to the database.  The connection can be established given the URL string for the
 database.
