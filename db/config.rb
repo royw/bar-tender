@@ -1,6 +1,8 @@
 require 'sequel'
+require 'fileutils'
 module Database
   DB_DIR = File.expand_path('data', File.dirname(__FILE__))
+  FileUtils.mkdir_p DB_DIR
   def self.url(mode)
     case mode
     when :dev
